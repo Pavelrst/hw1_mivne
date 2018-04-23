@@ -38,6 +38,7 @@ int SIM_CoreReset(void) {
     isHalt = false;
     waiting_for_memory = false;
 
+
     for(int i=0; i<SIM_REGFILE_SIZE; i++)//Resetting registers
         regFile[i] == 0;
     for(int i=0; i<SIM_PIPELINE_DEPTH; i++){//Resetting the pipe
@@ -59,19 +60,21 @@ int SIM_CoreReset(void) {
         pipe[i].my_pipe_state.cmd.src2 =0;
     }
 
-    //Was in FETCH
+    //Current state is similar to fetch.
+    int curr_st = FETCH;
 
-    SIM_MemInstRead(pipe[FETCH].command_address, &pipe[FETCH].my_pipe_state.cmd);
+    SIM_MemInstRead(pipe[curr_st].command_address, &pipe[curr_st].my_pipe_state.cmd);
 
     //Update src values
-    int reg_src1_index = pipe[FETCH].my_pipe_state.cmd.src1;
-    pipe[FETCH].my_pipe_state.src1Val = regFile[reg_src1_index];
+    int reg_src1_index = pipe[curr_st].my_pipe_state.cmd.src1;
+    pipe[curr_st].my_pipe_state.src1Val = regFile[reg_src1_index];
 
-    int reg_src2_index = pipe[FETCH].my_pipe_state.cmd.src2;
-    pipe[FETCH].my_pipe_state.src2Val = regFile[reg_src2_index];
+    //int reg_src2_index = pipe[curr_st].my_pipe_state.cmd.src2;
+    //pipe[curr_st].my_pipe_state.src2Val = regFile[reg_src2_index];
+    pipe[curr_st].my_pipe_state.src2Val = 0;
 
-    int reg_dst_index = pipe[FETCH].my_pipe_state.cmd.dst;
-    pipe[FETCH].dstVal = regFile[reg_dst_index];
+    int reg_dst_index = pipe[curr_st].my_pipe_state.cmd.dst;
+    pipe[curr_st].dstVal = regFile[reg_dst_index];
 
     //First command is in address 0, so already in IF in the pipe
     return 0;
@@ -107,6 +110,11 @@ void advancePipe(){
 
 void fetch(){
     int curr_st = FETCH;
+
+    if(waiting_for_memory){
+        return;
+    }
+
     PC += 4;
     if(isHalt){
       pipe[curr_st].command_address = -1;//NOP, not read from instruction memory
