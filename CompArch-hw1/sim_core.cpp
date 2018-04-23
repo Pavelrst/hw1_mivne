@@ -167,7 +167,6 @@ void fetch(){
         return;
     }
 
-//    PC += 4;
     if(isHalt){
       pipe[curr_st].command_address = -1;//NOP, not read from instruction memory
     }else{
@@ -357,12 +356,13 @@ void writeback(){
         case CMD_BRNEQ:
             break;
         case CMD_HALT:
+            PC += 4;
             break;
     }
 }
 
 void hazard_detect(){
-    if(pc>=4*4){//Can only happen after 3 clock cycles
+    if(PC>=4*4){//Can only happen after 3 clock cycles
         //Data hazard for hazard one nop in EXE
         bool dstIsSrc1 = pipe[MEMORY].my_pipe_state.cmd.dst == pipe[DECODE].my_pipe_state.cmd.src1;
         bool dstIsSrc2 = pipe[MEMORY].my_pipe_state.cmd.dst == pipe[DECODE].my_pipe_state.cmd.src2;
