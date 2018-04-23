@@ -124,8 +124,6 @@ void decode(){
 
         int reg_dst_index = pipe[DECODE].my_pipe_state.cmd.dst;
         pipe[DECODE].dstVal = regFile[reg_dst_index];
-    }else{
-      pipe[DECODE].my_pipe_state.cmd.opcode = CMD_NOP;
     }
 }
 
@@ -216,7 +214,30 @@ void memory(){
             break;
     }
 }
-void writeback(){}
+void writeback(){
+    switch(pipe[WRITEBACK].my_pipe_state.cmd.opcode){
+        case CMD_NOP:
+            break;
+        case CMD_ADD:
+        case CMD_SUB:
+        case CMD_ADDI:
+        case CMD_SUBI:
+            regFile[pipe[WRITEBACK].my_pipe_state.cmd.dst] = pipe[WRITEBACK].alu_result;
+            break;
+        case CMD_LOAD:
+            regFile[pipe[WRITEBACK].my_pipe_state.cmd.dst] = pipe[WRITEBACK].memory_data;
+            break;
+        case CMD_STORE:
+            break;
+        case CMD_BR:
+        case CMD_BREQ:
+        case CMD_BRNEQ:
+            break;
+        case CMD_HALT:
+            exit(0);
+            break;
+    }
+}
 
 void hazard_detect(){}
 
