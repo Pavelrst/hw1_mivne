@@ -109,9 +109,9 @@ void fetch(){
     pipe[FETCH].my_pipe_state.cmd.isSrc2Imm = 0;
 
     pc += 4;
-}
 
-void decode(){
+
+    //Was in DECODE
     if(!isHalt){
         SIM_MemInstRead(pipe[DECODE].command_address, &pipe[1].my_pipe_state.cmd);
 
@@ -125,6 +125,10 @@ void decode(){
         int reg_dst_index = pipe[DECODE].my_pipe_state.cmd.dst;
         pipe[DECODE].dstVal = regFile[reg_dst_index];
     }
+}
+
+void decode(){
+    //Empty
 }
 
 void execute(){
