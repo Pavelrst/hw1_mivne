@@ -58,6 +58,21 @@ int SIM_CoreReset(void) {
         pipe[i].my_pipe_state.cmd.src1 =0;
         pipe[i].my_pipe_state.cmd.src2 =0;
     }
+
+    //Was in FETCH
+
+    SIM_MemInstRead(pipe[FETCH].command_address, &pipe[FETCH].my_pipe_state.cmd);
+
+    //Update src values
+    int reg_src1_index = pipe[FETCH].my_pipe_state.cmd.src1;
+    pipe[FETCH].my_pipe_state.src1Val = regFile[reg_src1_index];
+
+    int reg_src2_index = pipe[FETCH].my_pipe_state.cmd.src2;
+    pipe[FETCH].my_pipe_state.src2Val = regFile[reg_src2_index];
+
+    int reg_dst_index = pipe[FETCH].my_pipe_state.cmd.dst;
+    pipe[FETCH].dstVal = regFile[reg_dst_index];
+
     //First command is in address 0, so already in IF in the pipe
     return 0;
 }
@@ -74,10 +89,12 @@ void advancePipe(){
         pipe[i].branch_taken = pipe[i-1].branch_taken;
         pipe[i].command_address = pipe[i-1].command_address;
         pipe[i].memory_data = pipe[i-1].memory_data;
+
         //updating pipe stage state struct
         pipe[i].dstVal = pipe[i-1].dstVal;
         pipe[i].my_pipe_state.src1Val = pipe[i-1].my_pipe_state.src1Val;
         pipe[i].my_pipe_state.src2Val = pipe[i-1].my_pipe_state.src2Val;
+
         //updating command struct in pipe stage struct
         pipe[i].my_pipe_state.cmd.src1 = pipe[i-1].my_pipe_state.cmd.src1;
         pipe[i].my_pipe_state.cmd.src2 = pipe[i-1].my_pipe_state.cmd.src2;
@@ -89,46 +106,46 @@ void advancePipe(){
 }
 
 void fetch(){
+    int curr_st = FETCH;
+    PC += 4;
     if(isHalt){
-      pipe[FETCH].command_address = -1;//NOP, not read from instruction memory
+      pipe[curr_st].command_address = -1;//NOP, not read from instruction memory
     }else{
-        pipe[FETCH].command_address = PC;
+        pipe[curr_st].command_address = PC;
     }
-    pipe[FETCH].branch_taken = false;
-    pipe[FETCH].alu_result = 0; //ours, not necessary
-    pipe[FETCH].memory_data = 0; // ours, not necessary
+    pipe[curr_st].branch_taken = false;
+    pipe[curr_st].alu_result = 0; //ours, not necessary
+    pipe[curr_st].memory_data = 0; // ours, not necessary
 
     //reset all printed fields - in struct pipeStageState
-    pipe[FETCH].my_pipe_state.src1Val = 0;
-    pipe[FETCH].my_pipe_state.src2Val = 0;
-    //All fields in the command are reset below
-//    pipe[FETCH].my_pipe_state.cmd.opcode = CMD_NOP;
-    pipe[FETCH].my_pipe_state.cmd.dst = 0;
-    pipe[FETCH].my_pipe_state.cmd.src1 = 0;
-    pipe[FETCH].my_pipe_state.cmd.src2 = 0;
-    pipe[FETCH].my_pipe_state.cmd.isSrc2Imm = 0;
-
-    PC += 4;
+    pipe[curr_st].my_pipe_state.src1Val = 0;
+    pipe[curr_st].my_pipe_state.src2Val = 0;
 
 
-    //Was in DECODE
     if(!isHalt){
-        SIM_MemInstRead(pipe[DECODE].command_address, &pipe[1].my_pipe_state.cmd);
+        SIM_MemInstRead(pipe[curr_st].command_address, &pipe[curr_st].my_pipe_state.cmd);
 
-        //Update src values
-        int reg_src1_index = pipe[DECODE].my_pipe_state.cmd.src1;
-        pipe[DECODE].my_pipe_state.src1Val = regFile[reg_src1_index];
+        //Update src values in the command struct.
+        int reg_src1_index = pipe[curr_st].my_pipe_state.cmd.src1;
+        pipe[curr_st].my_pipe_state.src1Val = regFile[reg_src1_index];
+        int reg_dst_index = pipe[curr_st].my_pipe_state.cmd.dst;
+        pipe[curr_st].dstVal = regFile[reg_dst_index];
 
-        int reg_src2_index = pipe[DECODE].my_pipe_state.cmd.src2;
-        pipe[DECODE].my_pipe_state.src2Val = regFile[reg_src2_index];
-
-        int reg_dst_index = pipe[DECODE].my_pipe_state.cmd.dst;
-        pipe[DECODE].dstVal = regFile[reg_dst_index];
+        pipe[curr_st].my_pipe_state.src2Val = 0;
     }
+
+
 }
 
 void decode(){
-    //Empty
+    int curr_st = DECODE;
+    // Check if src2 is immediate value.
+    if(pipe[curr_st].my_pipe_state.cmd.isSrc2Imm == false){
+        int reg_src2_index = pipe[curr_st].my_pipe_state.cmd.src2;
+        pipe[curr_st].my_pipe_state.src2Val = regFile[reg_src2_index];
+    } else{
+        pipe[curr_st].my_pipe_state.src2Val = pipe[curr_st].my_pipe_state.cmd.src2;
+    }
 }
 
 void execute(){
@@ -280,7 +297,6 @@ void writeback(){
         case CMD_BRNEQ:
             break;
         case CMD_HALT:
-            exit(0);
             break;
     }
 }
@@ -317,7 +333,6 @@ void SIM_CoreGetState(SIM_coreState *curState) {
         curState->regFile[i] = regFile[i];
     }
     for(int i=0; i<SIM_PIPELINE_DEPTH; i++){//Copying the pipeline
-//        curState->pipeStageState[i] = pipe[i].my_pipe_state;
         curState->pipeStageState[i].cmd = pipe[i].my_pipe_state.cmd;
         curState->pipeStageState[i].src1Val = pipe[i].my_pipe_state.src1Val;
         curState->pipeStageState[i].src2Val = pipe[i].my_pipe_state.src2Val;
