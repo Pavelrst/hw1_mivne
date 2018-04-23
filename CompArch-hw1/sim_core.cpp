@@ -59,6 +59,7 @@ int SIM_CoreReset(void) {
         pipe[i].my_pipe_state.cmd.src2 =0;
     }
     //First command is in address 0, so already in IF in the pipe
+    fetch();
     return 0;
 }
 /////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -102,7 +103,7 @@ void fetch(){
     pipe[FETCH].my_pipe_state.src1Val = 0;
     pipe[FETCH].my_pipe_state.src2Val = 0;
     //All fields in the command are reset below
-    pipe[FETCH].my_pipe_state.cmd.opcode = CMD_NOP;
+//    pipe[FETCH].my_pipe_state.cmd.opcode = CMD_NOP;
     pipe[FETCH].my_pipe_state.cmd.dst = 0;
     pipe[FETCH].my_pipe_state.cmd.src1 = 0;
     pipe[FETCH].my_pipe_state.cmd.src2 = 0;
