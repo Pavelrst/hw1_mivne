@@ -15,7 +15,7 @@ typedef struct pipe_level {
     //If you add new fields, remember to reset them in SIM_CoreReset and in advancePipe!!!!!!
 }pipeLevel;
 
-static int32_t pc;
+static int32_t PC;
 static int32_t regFile[SIM_REGFILE_SIZE];
 pipeLevel pipe[SIM_PIPELINE_DEPTH];
 bool isHalt;
@@ -92,7 +92,7 @@ void fetch(){
     if(isHalt){
       pipe[FETCH].command_address = -1;//NOP, not read from instruction memory
     }else{
-        pipe[FETCH].command_address = pc;
+        pipe[FETCH].command_address = PC;
     }
     pipe[FETCH].branch_taken = false;
     pipe[FETCH].alu_result = 0; //ours, not necessary
@@ -108,7 +108,7 @@ void fetch(){
     pipe[FETCH].my_pipe_state.cmd.src2 = 0;
     pipe[FETCH].my_pipe_state.cmd.isSrc2Imm = 0;
 
-    pc += 4;
+    PC += 4;
 
 
     //Was in DECODE
@@ -170,7 +170,7 @@ void execute(){
             }
             break;
         case CMD_BR:
-            pipe[EXECUTE].alu_result = (pc - 4) + dstVal;//-4 because we advanced PC too many times
+            pipe[EXECUTE].alu_result = (PC - 4) + dstVal;//-4 because we advanced PC too many times
             //PC is update at MEM stage of the pipe
             break;
         case CMD_BREQ:
@@ -180,7 +180,7 @@ void execute(){
             }else{
                 pipe[EXECUTE].branch_taken = false;
             }
-            pipe[EXECUTE].alu_result = (pc - 4) + dstVal;//-4 because we advanced PC too many times
+            pipe[EXECUTE].alu_result = (PC - 4) + dstVal;//-4 because we advanced PC too many times
             break;
         case CMD_BRNEQ:
             assert(pipe[2].my_pipe_state.cmd.isSrc2Imm == false);
@@ -189,7 +189,7 @@ void execute(){
             }else{
                 pipe[EXECUTE].branch_taken = false;
             }
-            pipe[EXECUTE].alu_result = (pc - 4) + dstVal;//-4 because we advanced PC too many times
+            pipe[EXECUTE].alu_result = (PC - 4) + dstVal;//-4 because we advanced PC too many times
             break;
         case CMD_HALT:
             isHalt = true;
@@ -270,7 +270,7 @@ void SIM_CoreClkTick() {
 */
 void SIM_CoreGetState(SIM_coreState *curState) {
     assert(curState != NULL);
-    curState->pc=pc;
+    curState->pc=PC;
     for(int i=0; i<SIM_REGFILE_SIZE; i++) {//Copying registers
         curState->regFile[i] = regFile[i];
     }
