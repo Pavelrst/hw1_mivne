@@ -9,6 +9,7 @@ typedef struct pipe_level {
     PipeStageState my_pipe_state; //Struct, defined in sim_api.h
     int32_t command_address;
     int32_t alu_result;
+    int32_t dstVal;
     bool branch_taken;
     int32_t memory_data;
     //If you add new fields, remember to reset them in SIM_CoreReset and in advancePipe!!!!!!
@@ -46,6 +47,7 @@ int SIM_CoreReset(void) {
         pipe[i].memory_data = 0;
 
         //Resetting the pipe state
+        pipe[i].dstVal = 0;
         pipe[i].my_pipe_state.src1Val = 0;
         pipe[i].my_pipe_state.src2Val = 0;
 
@@ -73,6 +75,7 @@ void advancePipe(){
         pipe[i].command_address = pipe[i-1].command_address;
         pipe[i].memory_data = pipe[i-1].memory_data;
         //updating pipe stage state struct
+        pipe[i].dstVal = pipe[i-1].dstVal;
         pipe[i].my_pipe_state.src1Val = pipe[i-1].my_pipe_state.src1Val;
         pipe[i].my_pipe_state.src2Val = pipe[i-1].my_pipe_state.src2Val;
         //updating command struct in pipe stage struct
@@ -111,70 +114,80 @@ void fetch(){
 void decode(){
     if(!isHalt){
         SIM_MemInstRead(pipe[DECODE].command_address, &pipe[1].my_pipe_state.cmd);
+
+        //Update src values
+        int reg_src1_index = pipe[DECODE].my_pipe_state.cmd.src1;
+        pipe[DECODE].my_pipe_state.src1Val = regFile[reg_src1_index];
+
+        int reg_src2_index = pipe[DECODE].my_pipe_state.cmd.src2;
+        pipe[DECODE].my_pipe_state.src2Val = regFile[reg_src2_index];
+
+        int reg_dst_index = pipe[DECODE].my_pipe_state.cmd.dst;
+        pipe[DECODE].dstVal = regFile[reg_dst_index];
     }else{
       pipe[DECODE].my_pipe_state.cmd.opcode = CMD_NOP;
     }
 }
 
 void execute(){
-    int dest = pipe[EXECUTE].my_pipe_state.cmd.dst;
-    int src1 = pipe[EXECUTE].my_pipe_state.cmd.src1;
-    int src2 = pipe[EXECUTE].my_pipe_state.cmd.src2;
+    int src1Val = pipe[EXECUTE].my_pipe_state.src1Val;
+    int src2Val = pipe[EXECUTE].my_pipe_state.src2Val;
+    int dstVal = pipe[EXECUTE].dstVal;
 
     switch(pipe[EXECUTE].my_pipe_state.cmd.opcode){
         case CMD_NOP:
             return;
         case CMD_ADD:
             assert(pipe[EXECUTE].my_pipe_state.cmd.isSrc2Imm == false);
-            regFile[dest] = regFile[src1] + regFile[src2];
+            pipe[EXECUTE].alu_result = src1Val + src2Val;
             break;
         case CMD_SUB:
             assert(pipe[EXECUTE].my_pipe_state.cmd.isSrc2Imm == false);
-            regFile[dest] = regFile[src1] - regFile[src2];
+            pipe[EXECUTE].alu_result = src1Val + src2Val;
             break;
         case CMD_ADDI:
             assert(pipe[EXECUTE].my_pipe_state.cmd.isSrc2Imm == true);
-            regFile[dest] = regFile[src1] + src2;
+            pipe[EXECUTE].alu_result = src1Val + pipe[EXECUTE].my_pipe_state.cmd.src2;
             break;
         case CMD_SUBI:
             assert(pipe[EXECUTE].my_pipe_state.cmd.isSrc2Imm == true);
-            regFile[dest] = regFile[src1] - src2;
+            pipe[EXECUTE].alu_result = src1Val - pipe[EXECUTE].my_pipe_state.cmd.src2;
             break;
         case CMD_LOAD:
             if(pipe[EXECUTE].my_pipe_state.cmd.isSrc2Imm == true){
-                pipe[EXECUTE].alu_result = regFile[src1] + src2;
+                pipe[EXECUTE].alu_result = src1Val + pipe[EXECUTE].my_pipe_state.cmd.src2;
             }else{
-                pipe[EXECUTE].alu_result = regFile[src1] + regFile[src2];
+                pipe[EXECUTE].alu_result = src1Val + src2Val;
             }
             break;
         case CMD_STORE:
             if(pipe[EXECUTE].my_pipe_state.cmd.isSrc2Imm == true){
-                pipe[EXECUTE].alu_result = regFile[dest] + src2;
+                pipe[EXECUTE].alu_result = dstVal + pipe[EXECUTE].my_pipe_state.cmd.src2;
             }else{
-                pipe[EXECUTE].alu_result = regFile[dest] + regFile[src2];
+                pipe[EXECUTE].alu_result = dstVal + src2Val;
             }
             break;
         case CMD_BR:
-            pipe[EXECUTE].alu_result = (pc - 4) + regFile[dest];//-4 because we advanced PC too many times
+            pipe[EXECUTE].alu_result = (pc - 4) + dstVal;//-4 because we advanced PC too many times
             //PC is update at MEM stage of the pipe
             break;
         case CMD_BREQ:
             assert(pipe[2].my_pipe_state.cmd.isSrc2Imm == false);
-            if(regFile[src1] == regFile[src2]){
+            if(src1Val == src2Val){
                 pipe[EXECUTE].branch_taken = true;
             }else{
                 pipe[EXECUTE].branch_taken = false;
             }
-            pipe[EXECUTE].alu_result = (pc - 4) + regFile[dest];//-4 because we advanced PC too many times
+            pipe[EXECUTE].alu_result = (pc - 4) + dstVal;//-4 because we advanced PC too many times
             break;
         case CMD_BRNEQ:
             assert(pipe[2].my_pipe_state.cmd.isSrc2Imm == false);
-            if(regFile[src1] != regFile[src2]){
+            if(src1Val != src2Val){
                 pipe[EXECUTE].branch_taken = true;
             }else{
                 pipe[EXECUTE].branch_taken = false;
             }
-            pipe[EXECUTE].alu_result = (pc - 4) + regFile[dest];//-4 because we advanced PC too many times
+            pipe[EXECUTE].alu_result = (pc - 4) + dstVal;//-4 because we advanced PC too many times
             break;
         case CMD_HALT:
             isHalt = true;
@@ -196,8 +209,7 @@ void memory(){
             }
             break;
         case CMD_STORE:
-            int32_t reg_index = pipe[MEMORY].my_pipe_state.cmd.src1;
-            SIM_MemDataWrite(memory_address, regFile[reg_index]);
+            SIM_MemDataWrite(memory_address, pipe[MEMORY].my_pipe_state.src1Val);
             break;
         default:
             //not a memory command
