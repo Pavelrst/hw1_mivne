@@ -87,6 +87,21 @@ void advancePipe(){
         pipe[i].my_pipe_state.cmd.isSrc2Imm = pipe[i-1].my_pipe_state.cmd.isSrc2Imm;
     }
     //For now command in Fetch is garbage
+
+    //Was in FETCH
+    if(!isHalt){
+        SIM_MemInstRead(pipe[DECODE].command_address, &pipe[1].my_pipe_state.cmd);
+
+        //Update src values
+        int reg_src1_index = pipe[DECODE].my_pipe_state.cmd.src1;
+        pipe[DECODE].my_pipe_state.src1Val = regFile[reg_src1_index];
+
+        int reg_src2_index = pipe[DECODE].my_pipe_state.cmd.src2;
+        pipe[DECODE].my_pipe_state.src2Val = regFile[reg_src2_index];
+
+        int reg_dst_index = pipe[DECODE].my_pipe_state.cmd.dst;
+        pipe[DECODE].dstVal = regFile[reg_dst_index];
+    }
 }
 
 void fetch(){
