@@ -59,7 +59,6 @@ int SIM_CoreReset(void) {
         pipe[i].my_pipe_state.cmd.src2 =0;
     }
     //First command is in address 0, so already in IF in the pipe
-    fetch();
     return 0;
 }
 /////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -87,21 +86,6 @@ void advancePipe(){
         pipe[i].my_pipe_state.cmd.isSrc2Imm = pipe[i-1].my_pipe_state.cmd.isSrc2Imm;
     }
     //For now command in Fetch is garbage
-
-    //Was in FETCH
-    if(!isHalt){
-        SIM_MemInstRead(pipe[DECODE].command_address, &pipe[1].my_pipe_state.cmd);
-
-        //Update src values
-        int reg_src1_index = pipe[DECODE].my_pipe_state.cmd.src1;
-        pipe[DECODE].my_pipe_state.src1Val = regFile[reg_src1_index];
-
-        int reg_src2_index = pipe[DECODE].my_pipe_state.cmd.src2;
-        pipe[DECODE].my_pipe_state.src2Val = regFile[reg_src2_index];
-
-        int reg_dst_index = pipe[DECODE].my_pipe_state.cmd.dst;
-        pipe[DECODE].dstVal = regFile[reg_dst_index];
-    }
 }
 
 void fetch(){
@@ -216,18 +200,60 @@ void execute(){
 }
 
 void memory(){
+    int curr_st = MEMORY;
     uint32_t memory_address = (uint32_t)pipe[MEMORY].alu_result;
-    switch(pipe[MEMORY].my_pipe_state.cmd.opcode){
+    switch(pipe[curr_st].my_pipe_state.cmd.opcode){
         case CMD_LOAD:
             //Memory may wait multiple cycles before giving result
-            if(SIM_MemDataRead(memory_address, &pipe[MEMORY].memory_data) != 0){
+            if(SIM_MemDataRead(memory_address, &pipe[curr_st].memory_data) != 0){
                 waiting_for_memory = true;
             }else{
                 waiting_for_memory = false;
             }
             break;
         case CMD_STORE:
-            SIM_MemDataWrite(memory_address, pipe[MEMORY].my_pipe_state.src1Val);
+            SIM_MemDataWrite(memory_address, pipe[curr_st].my_pipe_state.src1Val);
+            break;
+        case CMD_BR:
+            PC = pipe[curr_st].alu_result;//jmp
+
+            //Flushing the pipe
+            for(int i=0; i<curr_st; i++){
+                pipe[i].branch_taken = false;
+                pipe[i].alu_result = 0; //ours, not necessary
+                pipe[i].memory_data = 0; // ours, not necessary
+
+                pipe[i].my_pipe_state.src1Val = 0;
+                pipe[i].my_pipe_state.src2Val = 0;
+
+                pipe[i].my_pipe_state.cmd.opcode = CMD_NOP;
+                pipe[i].my_pipe_state.cmd.dst = 0;
+                pipe[i].my_pipe_state.cmd.src1 = 0;
+                pipe[i].my_pipe_state.cmd.src2 = 0;
+                pipe[i].my_pipe_state.cmd.isSrc2Imm = 0;
+            }
+            break;
+        case CMD_BREQ:
+        case CMD_BRNEQ:
+            if(pipe[curr_st].branch_taken){
+                PC = pipe[curr_st].alu_result;//jmp
+
+                //Flushing the pipe
+                for(int i=0; i<curr_st; i++){
+                    pipe[i].branch_taken = false;
+                    pipe[i].alu_result = 0; //ours, not necessary
+                    pipe[i].memory_data = 0; // ours, not necessary
+
+                    pipe[i].my_pipe_state.src1Val = 0;
+                    pipe[i].my_pipe_state.src2Val = 0;
+
+                    pipe[i].my_pipe_state.cmd.opcode = CMD_NOP;
+                    pipe[i].my_pipe_state.cmd.dst = 0;
+                    pipe[i].my_pipe_state.cmd.src1 = 0;
+                    pipe[i].my_pipe_state.cmd.src2 = 0;
+                    pipe[i].my_pipe_state.cmd.isSrc2Imm = 0;
+                }
+            }
             break;
         default:
             //not a memory command
