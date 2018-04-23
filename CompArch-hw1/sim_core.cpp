@@ -20,6 +20,7 @@ static int32_t regFile[SIM_REGFILE_SIZE];
 pipeLevel pipe[SIM_PIPELINE_DEPTH];
 bool isHalt;
 bool waiting_for_memory;
+bool hazard_exe_stage_nop;
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////Core reset/////////////////////////////////////////////////////////////
@@ -35,8 +36,10 @@ bool waiting_for_memory;
 */
 int SIM_CoreReset(void) {
     PC = 0;
+
     isHalt = false;
     waiting_for_memory = false;
+    hazard_exe_stage_nop = false;
 
 
     for(int i=0; i<SIM_REGFILE_SIZE; i++)//Resetting registers
@@ -87,6 +90,7 @@ void advancePipe(){
     if(waiting_for_memory == true){
         return;
     }
+    PC += 4;
     for(int i=SIM_PIPELINE_DEPTH-1; i>0; i--){
         pipe[i].alu_result = pipe[i-1].alu_result;
         pipe[i].branch_taken = pipe[i-1].branch_taken;
@@ -108,14 +112,62 @@ void advancePipe(){
     //For now command in Fetch is garbage
 }
 
+void advanceExeStageNop(){
+//    if(waiting_for_memory == true){
+//        return;
+//    }
+
+    //Only EXE and MEM stages advance to MEM and WB stages
+    for(int i=SIM_PIPELINE_DEPTH-1; i>EXECUTE; i--){
+        pipe[i].alu_result = pipe[i-1].alu_result;
+        pipe[i].branch_taken = pipe[i-1].branch_taken;
+        pipe[i].command_address = pipe[i-1].command_address;
+        pipe[i].memory_data = pipe[i-1].memory_data;
+
+        //updating pipe stage state struct
+        pipe[i].dstVal = pipe[i-1].dstVal;
+        pipe[i].my_pipe_state.src1Val = pipe[i-1].my_pipe_state.src1Val;
+        pipe[i].my_pipe_state.src2Val = pipe[i-1].my_pipe_state.src2Val;
+
+        //updating command struct in pipe stage struct
+        pipe[i].my_pipe_state.cmd.src1 = pipe[i-1].my_pipe_state.cmd.src1;
+        pipe[i].my_pipe_state.cmd.src2 = pipe[i-1].my_pipe_state.cmd.src2;
+        pipe[i].my_pipe_state.cmd.dst = pipe[i-1].my_pipe_state.cmd.dst;
+        pipe[i].my_pipe_state.cmd.opcode = pipe[i-1].my_pipe_state.cmd.opcode;
+        pipe[i].my_pipe_state.cmd.isSrc2Imm = pipe[i-1].my_pipe_state.cmd.isSrc2Imm;
+    }
+
+    //Add NOP to EXE
+    int curr_st = EXECUTE;
+    pipe[curr_st].alu_result = 0;
+    pipe[curr_st].command_address = 0;
+    pipe[curr_st].branch_taken = false;
+    pipe[curr_st].memory_data = 0;
+
+    //Resetting the pipe state
+    pipe[curr_st].dstVal = 0;
+    pipe[curr_st].my_pipe_state.src1Val = 0;
+    pipe[curr_st].my_pipe_state.src2Val = 0;
+
+    //Reset the command struct in the pipe state
+    pipe[curr_st].my_pipe_state.cmd.dst =0;
+    pipe[curr_st].my_pipe_state.cmd.isSrc2Imm =0;
+    pipe[curr_st].my_pipe_state.cmd.opcode = CMD_NOP;
+    pipe[curr_st].my_pipe_state.cmd.src1 =0;
+    pipe[curr_st].my_pipe_state.cmd.src2 =0;
+
+    //set down the flag
+    hazard_exe_stage_nop = false;
+}
+
 void fetch(){
     int curr_st = FETCH;
 
-    if(waiting_for_memory){
+    if(waiting_for_memory || hazard_exe_stage_nop){
         return;
     }
 
-    PC += 4;
+//    PC += 4;
     if(isHalt){
       pipe[curr_st].command_address = -1;//NOP, not read from instruction memory
     }else{
@@ -309,13 +361,24 @@ void writeback(){
     }
 }
 
-void hazard_detect(){}
+void hazard_detect(){
+    //Data hazard for hazard one nop in EXE
+    bool dstIsSrc1 = pipe[MEMORY].my_pipe_state.cmd.dst == pipe[DECODE].my_pipe_state.cmd.src1;
+    bool dstIsSrc2 = pipe[MEMORY].my_pipe_state.cmd.dst == pipe[DECODE].my_pipe_state.cmd.src2;
+    if((dstIsSrc1 || dstIsSrc2) && !waiting_for_memory){
+        hazard_exe_stage_nop = true;
+    }
+}
 
 /*! SIM_CoreClkTick: Update the core simulator's state given one clock cycle.
   This function is expected to update the core pipeline given a clock cycle event.
 */
 void SIM_CoreClkTick() {
-    advancePipe();
+    if(hazard_exe_stage_nop){
+       advanceExeStageNop();
+    }else{
+        advancePipe();
+    }
 
     fetch();
     decode();
