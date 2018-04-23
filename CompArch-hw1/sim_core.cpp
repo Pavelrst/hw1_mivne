@@ -15,7 +15,7 @@ typedef struct pipe_level {
     //If you add new fields, remember to reset them in SIM_CoreReset and in advancePipe!!!!!!
 }pipeLevel;
 
-static int32_t PC;
+static int32_t pc;
 static int32_t regFile[SIM_REGFILE_SIZE];
 pipeLevel pipe[SIM_PIPELINE_DEPTH];
 bool isHalt;
