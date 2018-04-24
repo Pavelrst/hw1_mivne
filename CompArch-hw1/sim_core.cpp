@@ -354,33 +354,13 @@ void writeback(){
     }
 }
 
-void detectDataHazardEXEtoID(){
-    int destination = getDstRegOfPipeStage(EXECUTE);
-    if(destination == -1) return;           //If this command does not write back to the register file
-    if(pipe[DECODE].my_pipe_state.cmd.src1 == destination){
-        printf("data hazard from EXE to ID detected!\n");
-        hazard_exe_stage_nop = true;
-    }else if (pipe[DECODE].my_pipe_state.cmd.src2 == destination){
-        printf("data hazard from EXE to ID detected!\n");
-        hazard_exe_stage_nop = true;
-    }
-}
 
-void detectDataHazardMEMtoID(){
-    int destination = getDstRegOfPipeStage(MEMORY);
-    if(destination == -1) return;           //If this command does not write back to the register file
-    if(pipe[DECODE].my_pipe_state.cmd.src1 == destination){
-        printf("data hazard from MEM to ID detected!\n");
-        hazard_exe_stage_nop = true;
-    }else if (pipe[DECODE].my_pipe_state.cmd.src2 == destination){
-        printf("data hazard from MEM to ID detected!\n");
-        hazard_exe_stage_nop = true;
-    }
-
-}
-
-void detectDataHazardWBtoID(){
-    int destination = getDstRegOfPipeStage(WRITEBACK);
+//Finds data hazard from pipe_stage to the command in DECODE
+//@param pipe_stage - EXECUTE, MEMORY or WRITEBACK
+//The function checks whether the command in the given pipe stage will write to one of the registers the command in
+//DECODE stage is trying to read now.
+void detectDataHazardFromPipeStage(int pipe_stage){
+    int destination = getDstRegOfPipeStage(pipe_stage);
     if(destination == -1) return;           //If this command does not write back to the register file
     if(pipe[DECODE].my_pipe_state.cmd.src1 == destination){
         printf("data hazard from WB to ID detected!\n");
@@ -392,8 +372,10 @@ void detectDataHazardWBtoID(){
 }
 
 void hazard_detect(){
+    //Set off all hazard flags
+    hazard_exe_stage_nop = false;
 
-    //Read after write handling
+    //If one function is writing to the registers at the same cycle another function is reading them
     int dst_reg_index = pipe[WRITEBACK].my_pipe_state.cmd.dst;
     if(dst_reg_index == pipe[DECODE].my_pipe_state.cmd.src1){
         pipe[DECODE].my_pipe_state.src1Val = regFile[dst_reg_index];
@@ -401,17 +383,16 @@ void hazard_detect(){
         pipe[DECODE].my_pipe_state.src2Val = regFile[dst_reg_index];
     }
 
-    hazard_exe_stage_nop = false;//each new round reevaluate
-    detectDataHazardEXEtoID();
-    detectDataHazardMEMtoID();
-    detectDataHazardWBtoID();
+    //Find data hazards
+    detectDataHazardFromPipeStage(EXECUTE);
+    detectDataHazardFromPipeStage(MEMORY);
+    detectDataHazardFromPipeStage(WRITEBACK);
 }
 
 /*! SIM_CoreClkTick: Update the core simulator's state given one clock cycle.
   This function is expected to update the core pipeline given a clock cycle event.
 */
 void SIM_CoreClkTick() {
-    printf("beginning of clock tick- hazard_exe_stage nop is %d\n", hazard_exe_stage_nop);
     hazard_detect();
     advancePipe();
 
