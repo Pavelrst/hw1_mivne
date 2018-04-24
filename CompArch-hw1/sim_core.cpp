@@ -70,6 +70,23 @@ void advancePipeStage(int i){
     pipe[i+1].my_pipe_state.cmd.isSrc2Imm = pipe[i].my_pipe_state.cmd.isSrc2Imm;
 }
 
+//Gets a pipe stage index
+//Returns -1 if the command in that pipe stage doesn't write to the register stage in WRITEBACK stage
+//Otherwise, returns the dst register index
+int getDstRegOfPipeStage(int i){
+    assert(i>=FETCH && i<=WRITEBACK);
+    switch(pipe[i].my_pipe_state.cmd.opcode){
+        case CMD_NOP:
+        case CMD_HALT:
+        case CMD_BR:
+        case CMD_BRNEQ:
+        case CMD_BREQ:
+        case CMD_STORE:
+            return -1;
+    }
+    return pipe[i].my_pipe_state.cmd.dst;
+}
+
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////Core reset/////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -129,8 +146,17 @@ void advancePipeNoHazards(){
     //For now command in Fetch is garbage
 }
 
+void flushPipeBranchTaken(){
+    assert(pipe[MEMORY].branch_taken == true);
+    flushPipeStage(FETCH);
+    flushPipeStage(DECODE);
+    flushPipeStage(EXECUTE);
+    PC = pipe[MEMORY].alu_result;
+}
+
 void advanceExeStageNop(){
 
+    printf("Advance EXE stage NOP invoked\n");
     //Only EXE and MEM stages advance to MEM and WB stages
     advancePipeStage(MEMORY);
     advancePipeStage(EXECUTE);
@@ -143,7 +169,13 @@ void advanceExeStageNop(){
 }
 
 void advancePipeNoFlags(){
-    if(hazard_exe_stage_nop){
+    if(pipe[MEMORY].branch_taken){      //If branch is taken, flush pipe BEFORE advancing the pipe
+        flushPipeBranchTaken();
+        advancePipeNoHazards();
+
+        assert(waiting_for_memory == false);//We jump from MEM stage, so we cannot have a LOAD command in the me stage
+        hazard_exe_stage_nop = false;       //No need to flush for hazards if we took the branch
+    }else if(hazard_exe_stage_nop == true){
         advanceExeStageNop();
     }else{
         advancePipeNoHazards();
@@ -151,9 +183,11 @@ void advancePipeNoFlags(){
 }
 
 //This function puts new commands and/or nops in different stages of the pipe
-void advancePipe(){
-    if(waiting_for_memory == true)
+void advancePipe() {
+    if (waiting_for_memory == true) {
+        flushPipeStage(WRITEBACK);
         return;
+    }
     if(forwarding == false) {    //No flags
         assert(split_regfile == false);
         advancePipeNoFlags();
@@ -164,6 +198,12 @@ void fetch(){
     int curr_st = FETCH;
 
     if(waiting_for_memory || hazard_exe_stage_nop){
+
+        printf("No fetch- ");
+        if(waiting_for_memory)
+            printf("waiting for memory\n");
+        else
+            printf("data hazard \n");
         return;
     }
 
@@ -289,14 +329,10 @@ void memory(){
         case CMD_BR:
         case CMD_BREQ:
         case CMD_BRNEQ:
-            if(pipe[curr_st].branch_taken){
-                PC = pipe[curr_st].alu_result;//jmp
-
-                //Flushing the pipe before EXECUTE
-                for(int i=FETCH; i<EXECUTE; i++){
-                    flushPipeStage(i);
-                }
-            }
+            //Jumping is done only after clock tick! see
+//            if(pipe[curr_st].branch_taken){
+//                PC = pipe[curr_st].alu_result;//jmp
+//            }
             break;
         default:
             //not a memory command
@@ -315,37 +351,79 @@ void writeback(){
             regFile[pipe[WRITEBACK].my_pipe_state.cmd.dst] = pipe[WRITEBACK].memory_data;
             break;
         case CMD_HALT:
-            PC += 4;
+//            PC += 4;
             break;
         default:
             break;
     }
 }
 
-void hazard_detect(){
-    if(PC>=4*4){//Can only happen after 3 clock cycles
-        //Data hazard for hazard one nop in EXE
-        bool dstIsSrc1 = pipe[MEMORY].my_pipe_state.cmd.dst == pipe[DECODE].my_pipe_state.cmd.src1;
-        bool dstIsSrc2 = pipe[MEMORY].my_pipe_state.cmd.dst == pipe[DECODE].my_pipe_state.cmd.src2;
-        if((dstIsSrc1 || dstIsSrc2) && !waiting_for_memory){
-            hazard_exe_stage_nop = true;
-        }
+void detectDataHazardEXEtoID(){
+    int destination = getDstRegOfPipeStage(EXECUTE);
+    if(destination == -1) return;           //If this command does not write back to the register file
+    if(pipe[DECODE].my_pipe_state.cmd.src1 == destination){
+        printf("data hazard from EXE to ID detected!\n");
+        hazard_exe_stage_nop = true;
+    }else if (pipe[DECODE].my_pipe_state.cmd.src2 == destination){
+        printf("data hazard from EXE to ID detected!\n");
+        hazard_exe_stage_nop = true;
     }
+}
+
+void detectDataHazardMEMtoID(){
+    int destination = getDstRegOfPipeStage(MEMORY);
+    if(destination == -1) return;           //If this command does not write back to the register file
+    if(pipe[DECODE].my_pipe_state.cmd.src1 == destination){
+        printf("data hazard from MEM to ID detected!\n");
+        hazard_exe_stage_nop = true;
+    }else if (pipe[DECODE].my_pipe_state.cmd.src2 == destination){
+        printf("data hazard from MEM to ID detected!\n");
+        hazard_exe_stage_nop = true;
+    }
+
+}
+
+void detectDataHazardWBtoID(){
+    int destination = getDstRegOfPipeStage(WRITEBACK);
+    if(destination == -1) return;           //If this command does not write back to the register file
+    if(pipe[DECODE].my_pipe_state.cmd.src1 == destination){
+        printf("data hazard from WB to ID detected!\n");
+        hazard_exe_stage_nop = true;
+    }else if (pipe[DECODE].my_pipe_state.cmd.src2 == destination){
+        printf("data hazard from WB to ID detected!\n");
+        hazard_exe_stage_nop = true;
+    }
+}
+
+void hazard_detect(){
+
+    //Read after write handling
+    int dst_reg_index = pipe[WRITEBACK].my_pipe_state.cmd.dst;
+    if(dst_reg_index == pipe[DECODE].my_pipe_state.cmd.src1){
+        pipe[DECODE].my_pipe_state.src1Val = regFile[dst_reg_index];
+    }else if (dst_reg_index == pipe[DECODE].my_pipe_state.cmd.src2){
+        pipe[DECODE].my_pipe_state.src2Val = regFile[dst_reg_index];
+    }
+
+    hazard_exe_stage_nop = false;//each new round reevaluate
+    detectDataHazardEXEtoID();
+    detectDataHazardMEMtoID();
+    detectDataHazardWBtoID();
 }
 
 /*! SIM_CoreClkTick: Update the core simulator's state given one clock cycle.
   This function is expected to update the core pipeline given a clock cycle event.
 */
 void SIM_CoreClkTick() {
+    printf("beginning of clock tick- hazard_exe_stage nop is %d\n", hazard_exe_stage_nop);
+    hazard_detect();
     advancePipe();
-    
+
     fetch();
     decode();
     execute();
     memory();
     writeback();
-
-    hazard_detect();
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////
