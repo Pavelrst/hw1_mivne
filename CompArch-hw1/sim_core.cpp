@@ -158,7 +158,8 @@ void flushPipeBranchTaken(){
     flushPipeStage(FETCH);
     flushPipeStage(DECODE);
     flushPipeStage(EXECUTE);
-    PC = pipe[MEMORY].alu_result; //update PC address
+    printf("we are about to flush for a taken branch. We have command address as %d and dstVal as %d\n", pipe[MEMORY].command_address, pipe[MEMORY].dstVal);
+    PC = pipe[MEMORY].command_address+pipe[MEMORY].dstVal; //update PC address
 }
 
 //Called to solve data hazards
@@ -184,7 +185,7 @@ void advancePipe() {
         flushPipeStage(WRITEBACK);
         return;
     }
-        if(pipe[MEMORY].branch_taken){      //If branch is taken, flush pipe BEFORE advancing the pipe
+    if(pipe[MEMORY].branch_taken){      //If branch is taken, flush pipe BEFORE advancing the pipe
         flushPipeBranchTaken();
         advancePipeNoHazards();
 
@@ -211,17 +212,24 @@ void fetch(){
         SIM_MemInstRead(pipe[curr_st].command_address, &pipe[curr_st].my_pipe_state.cmd);
 
         //Update src values in the command struct.
-        int reg_src1_index = pipe[curr_st].my_pipe_state.cmd.src1;
-        pipe[curr_st].my_pipe_state.src1Val = regFile[reg_src1_index];
-        int reg_dst_index = pipe[curr_st].my_pipe_state.cmd.dst;
-        pipe[curr_st].dstVal = regFile[reg_dst_index];
+//        int reg_src1_index = pipe[curr_st].my_pipe_state.cmd.src1;
+//        pipe[curr_st].my_pipe_state.src1Val = regFile[reg_src1_index];
+        pipe[curr_st].dstVal = 0;
+//        int reg_dst_index = pipe[curr_st].my_pipe_state.cmd.dst;
+//        pipe[curr_st].dstVal = regFile[reg_dst_index];
+//        printf("dstVal is now updated to %d\n", regFile[reg_dst_index]);
 
+        pipe[curr_st].my_pipe_state.src1Val = 0; //Only know this value in DECODE, after we check if it is an immediate
         pipe[curr_st].my_pipe_state.src2Val = 0; //Only know this value in DECODE, after we check if it is an immediate
     }
 }
 
 void decode(){
     int curr_st = DECODE;
+
+    int reg_src1_index = pipe[curr_st].my_pipe_state.cmd.src1;
+    pipe[curr_st].my_pipe_state.src1Val = regFile[reg_src1_index];
+
     // Check if src2 is an immediate value.
     if(pipe[curr_st].my_pipe_state.cmd.isSrc2Imm == false){
         int reg_src2_index = pipe[curr_st].my_pipe_state.cmd.src2;
@@ -230,12 +238,72 @@ void decode(){
         pipe[curr_st].my_pipe_state.src2Val = pipe[curr_st].my_pipe_state.cmd.src2;
     }
 
+    int reg_dst_index = pipe[curr_st].my_pipe_state.cmd.dst;
+    pipe[curr_st].dstVal = regFile[reg_dst_index];
+
     //If the command is BR, the branch is always taken
     if(pipe[curr_st].my_pipe_state.cmd.opcode == CMD_BR)
         pipe[curr_st].branch_taken = true;
 }
 
+void forwardData(){
+    if(!forwarding) return;
+    int exe_opcode = pipe[EXECUTE].my_pipe_state.cmd.opcode;    //Opcode of the command in EXE
+
+    //commands that do not read data from registers
+    if(exe_opcode == CMD_BR || exe_opcode == CMD_NOP || exe_opcode == CMD_HALT) return;
+
+    //Forwarding from MEMORY to EXECUTE
+    int mem_cmd_dst = getDstRegOfPipeStage(MEMORY);
+    if(mem_cmd_dst != -1 && pipe[MEMORY].my_pipe_state.cmd.opcode != CMD_LOAD){ //Forward to the command before
+        //NOTE: LOAD cannot be solved by forwarding as the data isn't ready yet. We must use nop
+        //Therefore we are certain the result is in alu_result and not memory_address
+
+        if(pipe[EXECUTE].my_pipe_state.cmd.src1 == mem_cmd_dst){
+            printf("Data forwarded from MEM to EXE\n");
+            pipe[EXECUTE].my_pipe_state.src1Val = pipe[MEMORY].alu_result;
+            return; //Data cannot be forwarded twice
+        }else if(!pipe[EXECUTE].my_pipe_state.cmd.isSrc2Imm && pipe[EXECUTE].my_pipe_state.cmd.src2 == mem_cmd_dst){
+            printf("Data forwarded from MEM to EXE\n");
+            pipe[EXECUTE].my_pipe_state.src2Val = pipe[MEMORY].alu_result;
+            return; //Data cannot be forwarded twice
+        }
+    }
+
+    //Forwarding from WRITEBACK to EXECUTE
+    int wb_cmd_dst = getDstRegOfPipeStage(WRITEBACK);
+    if(wb_cmd_dst != -1){           //If the signal regWrite = 1
+
+        //Find the data to forward can be either in alu_result or in memory_data
+        int data_to_forward = -1;
+        switch(pipe[WRITEBACK].my_pipe_state.cmd.opcode){
+            case CMD_ADD:
+            case CMD_SUB:
+            case CMD_ADDI:
+            case CMD_SUBI:
+                data_to_forward = pipe[WRITEBACK].alu_result;
+                break;
+            case CMD_LOAD:
+                data_to_forward = pipe[WRITEBACK].memory_data;
+                break;
+            default:
+                assert(0!=0);//If the command is not one of the above 5 we shouldn't have gotten here
+                return;
+        }
+
+        if(pipe[EXECUTE].my_pipe_state.cmd.src1 == wb_cmd_dst){
+            printf("Data forwarded from WB to EXE\n");
+            pipe[EXECUTE].my_pipe_state.src1Val = data_to_forward;
+        }else if(!pipe[EXECUTE].my_pipe_state.cmd.isSrc2Imm && pipe[EXECUTE].my_pipe_state.cmd.src2 == wb_cmd_dst){
+            printf("Data forwarded from WB to EXE\n");
+            pipe[EXECUTE].my_pipe_state.src2Val = data_to_forward;
+        }
+    }
+}
+
 void execute(){
+    forwardData();//Will only work if forwarding flag was given
+
     int src1Val = pipe[EXECUTE].my_pipe_state.src1Val;
     int src2Val = pipe[EXECUTE].my_pipe_state.src2Val;
     int dstVal = pipe[EXECUTE].dstVal;
@@ -249,7 +317,7 @@ void execute(){
             break;
         case CMD_SUB:
             assert(pipe[EXECUTE].my_pipe_state.cmd.isSrc2Imm == false);
-            pipe[EXECUTE].alu_result = src1Val + src2Val;
+            pipe[EXECUTE].alu_result = src1Val - src2Val;
             break;
         case CMD_ADDI:
             assert(pipe[EXECUTE].my_pipe_state.cmd.isSrc2Imm == true);
@@ -296,7 +364,9 @@ void execute(){
             pipe[EXECUTE].alu_result = (PC - 4) + dstVal;//-4 because we advanced PC too many times
             break;
         case CMD_HALT:
-            isHalt = true;
+            if(!pipe[MEMORY].branch_taken){ //If we are about to branch over this halt, do not stop the program
+                isHalt = true;
+            }
             break;
         default:
             printf("Command has no legal opcode!!");
@@ -332,9 +402,9 @@ void memory(){
 }
 
 void splitRegfile(){
-    assert(split_regfile);
+    assert(split_regfile || forwarding);
 
-    int dst_reg_value = -1;         //The register value we need to forward
+    int dst_reg_value = -1;         //The register value we need to forward, can be either in alu_result or memory_data
     switch(pipe[WRITEBACK].my_pipe_state.cmd.opcode){
         case CMD_LOAD:
             dst_reg_value = pipe[WRITEBACK].memory_data;
@@ -354,7 +424,7 @@ void splitRegfile(){
     int dst_reg_index = pipe[WRITEBACK].my_pipe_state.cmd.dst;
     if(dst_reg_index == pipe[DECODE].my_pipe_state.cmd.src1){
         pipe[DECODE].my_pipe_state.src1Val = dst_reg_value;
-    }else if (dst_reg_index == pipe[DECODE].my_pipe_state.cmd.src2){
+    }else if (!pipe[DECODE].my_pipe_state.cmd.isSrc2Imm && dst_reg_index == pipe[DECODE].my_pipe_state.cmd.src2){
         pipe[DECODE].my_pipe_state.src2Val = dst_reg_value;
     }
 }
@@ -382,7 +452,7 @@ void writeback(){
             break;
     }
 
-    if(split_regfile){
+    if(split_regfile || forwarding){
         splitRegfile();
     }
 }
@@ -417,9 +487,13 @@ void hazard_detect(){
     }
 
     //Find data hazards
-    detectDataHazardFromPipeStage(EXECUTE);
-    detectDataHazardFromPipeStage(MEMORY);
-    if(split_regfile == false){
+    if(!forwarding || pipe[EXECUTE].my_pipe_state.cmd.opcode == CMD_LOAD){  //LOAD will still cause a hazard here
+        detectDataHazardFromPipeStage(EXECUTE);
+    }
+    if(!forwarding){
+        detectDataHazardFromPipeStage(MEMORY);
+    }
+    if(!split_regfile && !forwarding){      //Data hazard from Writeback impossible with split regfile
         detectDataHazardFromPipeStage(WRITEBACK);
     }
 }
