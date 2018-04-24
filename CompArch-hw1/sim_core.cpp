@@ -27,20 +27,25 @@ bool hazard_exe_stage_nop;
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //Flushes the pipe's command at stage i
+//
+//A flushed command is of type CMD_NOP, has all values set to 0
+//The command address is -1, as it was not read from anywhere (for debugging)
 void flushPipeStage(int stage){
     assert(stage>=FETCH && stage <=WRITEBACK);//legal stage parameter
+
+    //Set to 0 all the fields we have added to the pipe stages
     pipe[stage].alu_result = 0;
     pipe[stage].command_address = -1;//For debugging - this is a flush not a nope we read from instruction memory
     pipe[stage].branch_taken = false;
     pipe[stage].memory_data = 0;
     pipe[stage].dstVal = 0;
 
-    //Resetting the pipe state
+    //Resetting the pipe state stage as was defined in sim_api.h
     pipe[stage].dstVal = 0;
     pipe[stage].my_pipe_state.src1Val = 0;
     pipe[stage].my_pipe_state.src2Val = 0;
 
-    //Reset the command struct in the pipe state
+    //Reset the command struct in the pipe state stage
     pipe[stage].my_pipe_state.cmd.dst =0;
     pipe[stage].my_pipe_state.cmd.isSrc2Imm =0;
     pipe[stage].my_pipe_state.cmd.opcode = CMD_NOP;
@@ -49,9 +54,11 @@ void flushPipeStage(int stage){
 }
 
 //Advances the pipe's command at stage i to the pipe at stage i+1
-//MUST advance stages from higher i values to lower i values
+//If advancing multiple stages, MUST advance stages from higher i values to lower i values
 void advancePipeStage(int i){
     assert(i>=FETCH && i<WRITEBACK);//Only the first four stages can be advanced
+
+    //Updating the fields we have added on top of the given struct
     pipe[i+1].alu_result = pipe[i].alu_result;
     pipe[i+1].branch_taken = pipe[i].branch_taken;
     pipe[i+1].command_address = pipe[i].command_address;
@@ -109,6 +116,7 @@ int SIM_CoreReset(void) {
 
     for(int i=0; i<SIM_REGFILE_SIZE; i++)//Resetting registers
         regFile[i] == 0;
+
     for(int i=0; i<SIM_PIPELINE_DEPTH; i++)//Resetting the pipe
         flushPipeStage(i);
 
@@ -122,14 +130,11 @@ int SIM_CoreReset(void) {
     int reg_src1_index = pipe[curr_st].my_pipe_state.cmd.src1;
     pipe[curr_st].my_pipe_state.src1Val = regFile[reg_src1_index];
 
-    //int reg_src2_index = pipe[curr_st].my_pipe_state.cmd.src2;
-    //pipe[curr_st].my_pipe_state.src2Val = regFile[reg_src2_index];
-    pipe[curr_st].my_pipe_state.src2Val = 0;
+    pipe[curr_st].my_pipe_state.src2Val = 0; //src2Val is set in decode, after we determine if it is an immediate or not
 
     int reg_dst_index = pipe[curr_st].my_pipe_state.cmd.dst;
     pipe[curr_st].dstVal = regFile[reg_dst_index];
 
-    //First command is in address 0, so already in IF in the pipe
     return 0;
 }
 /////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -143,17 +148,21 @@ void advancePipeNoHazards(){
     for(int i=MEMORY; i>=FETCH; i--)
         advancePipeStage(i);
 
-    //For now command in Fetch is garbage
+    //For now command in Fetch is garbage, fetch is going to read it (or add nope if we are halted)
 }
 
+//Flush the pipe in case we are taking a branch.
+//After this command, advancePipeNoHazards will be called and move everything one stage forward
 void flushPipeBranchTaken(){
     assert(pipe[MEMORY].branch_taken == true);
     flushPipeStage(FETCH);
     flushPipeStage(DECODE);
     flushPipeStage(EXECUTE);
-    PC = pipe[MEMORY].alu_result;
+    PC = pipe[MEMORY].alu_result; //update PC address
 }
 
+//Called to solve data hazards
+//Advances stages MEM and EXE, puts a NOP in EXE and doesn't advance IF or ID
 void advanceExeStageNop(){
 
     printf("Advance EXE stage NOP invoked\n");
@@ -168,6 +177,7 @@ void advanceExeStageNop(){
     hazard_exe_stage_nop = false;
 }
 
+//How to advance commands in the pipe if no branches are taken
 void advancePipeNoFlags(){
     if(pipe[MEMORY].branch_taken){      //If branch is taken, flush pipe BEFORE advancing the pipe
         flushPipeBranchTaken();
@@ -175,7 +185,7 @@ void advancePipeNoFlags(){
 
         assert(waiting_for_memory == false);//We jump from MEM stage, so we cannot have a LOAD command in the me stage
         hazard_exe_stage_nop = false;       //No need to flush for hazards if we took the branch
-    }else if(hazard_exe_stage_nop == true){
+    }else if(hazard_exe_stage_nop == true){ //Data Hazard
         advanceExeStageNop();
     }else{
         advancePipeNoHazards();
@@ -185,6 +195,7 @@ void advancePipeNoFlags(){
 //This function puts new commands and/or nops in different stages of the pipe
 void advancePipe() {
     if (waiting_for_memory == true) {
+        //All pipe stages besides WRITEBACK stay the same
         flushPipeStage(WRITEBACK);
         return;
     }
@@ -197,25 +208,14 @@ void advancePipe() {
 void fetch(){
     int curr_st = FETCH;
 
-    if(waiting_for_memory || hazard_exe_stage_nop){
-
-        printf("No fetch- ");
-        if(waiting_for_memory)
-            printf("waiting for memory\n");
-        else
-            printf("data hazard \n");
+    if(waiting_for_memory || hazard_exe_stage_nop){     //In this case do NOT fetch a new command
         return;
     }
 
-    flushPipeStage(curr_st);
+    flushPipeStage(curr_st); //Set all fields to zero and all values to default. Cmd is set to NOP
 
-    if(isHalt){
-      pipe[curr_st].command_address = -1;//NOP, not read from instruction memory
-    }else{
+    if(!isHalt){ //Read command from memory
         pipe[curr_st].command_address = PC;
-    }
-
-    if(!isHalt){
         SIM_MemInstRead(pipe[curr_st].command_address, &pipe[curr_st].my_pipe_state.cmd);
 
         //Update src values in the command struct.
@@ -224,13 +224,13 @@ void fetch(){
         int reg_dst_index = pipe[curr_st].my_pipe_state.cmd.dst;
         pipe[curr_st].dstVal = regFile[reg_dst_index];
 
-        pipe[curr_st].my_pipe_state.src2Val = 0;
+        pipe[curr_st].my_pipe_state.src2Val = 0; //Only know this value in DECODE, after we check if it is an immediate
     }
 }
 
 void decode(){
     int curr_st = DECODE;
-    // Check if src2 is immediate value.
+    // Check if src2 is an immediate value.
     if(pipe[curr_st].my_pipe_state.cmd.isSrc2Imm == false){
         int reg_src2_index = pipe[curr_st].my_pipe_state.cmd.src2;
         pipe[curr_st].my_pipe_state.src2Val = regFile[reg_src2_index];
@@ -329,10 +329,7 @@ void memory(){
         case CMD_BR:
         case CMD_BREQ:
         case CMD_BRNEQ:
-            //Jumping is done only after clock tick! see
-//            if(pipe[curr_st].branch_taken){
-//                PC = pipe[curr_st].alu_result;//jmp
-//            }
+            //Jumping is done only after clock tick! Not now. See flushPipeBranchTaken()
             break;
         default:
             //not a memory command
@@ -351,7 +348,6 @@ void writeback(){
             regFile[pipe[WRITEBACK].my_pipe_state.cmd.dst] = pipe[WRITEBACK].memory_data;
             break;
         case CMD_HALT:
-//            PC += 4;
             break;
         default:
             break;
