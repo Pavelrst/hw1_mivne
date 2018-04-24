@@ -199,10 +199,7 @@ void advancePipe() {
         flushPipeStage(WRITEBACK);
         return;
     }
-    if(forwarding == false) {    //No flags
-        assert(split_regfile == false);
-        advancePipeNoFlags();
-    }
+    advancePipeNoFlags();
 }
 
 void fetch(){
@@ -316,6 +313,7 @@ void memory(){
     uint32_t memory_address = (uint32_t)pipe[MEMORY].alu_result;
     switch(pipe[curr_st].my_pipe_state.cmd.opcode){
         case CMD_LOAD:
+            assert(memory_address%4 == 0);//legal memory address
             //Memory may wait multiple cycles before giving result
             if(SIM_MemDataRead(memory_address, &pipe[curr_st].memory_data) != 0){
                 waiting_for_memory = true;
@@ -324,6 +322,7 @@ void memory(){
             }
             break;
         case CMD_STORE:
+            assert(memory_address%4 == 0);//legal memory address
             SIM_MemDataWrite(memory_address, pipe[curr_st].my_pipe_state.src1Val);
             break;
         case CMD_BR:
@@ -336,21 +335,60 @@ void memory(){
             break;
     }
 }
+
+void splitRegfile(){
+    assert(split_regfile);
+
+    int dst_reg_value = -1;         //The register value we need to forward
+    switch(pipe[WRITEBACK].my_pipe_state.cmd.opcode){
+        case CMD_LOAD:
+            dst_reg_value = pipe[WRITEBACK].memory_data;
+            break;
+        case CMD_ADD:
+        case CMD_SUB:
+        case CMD_ADDI:
+        case CMD_SUBI:
+            dst_reg_value = pipe[WRITEBACK].alu_result;
+            break;
+        default:
+            //If the command doesn't write to any registers in the writeback stage
+            return;
+    }
+
+    //The actual forwarding
+    int dst_reg_index = pipe[WRITEBACK].my_pipe_state.cmd.dst;
+    if(dst_reg_index == pipe[DECODE].my_pipe_state.cmd.src1){
+        pipe[DECODE].my_pipe_state.src1Val = dst_reg_value;
+    }else if (dst_reg_index == pipe[DECODE].my_pipe_state.cmd.src2){
+        pipe[DECODE].my_pipe_state.src2Val = dst_reg_value;
+    }
+}
+
 void writeback(){
+    int dstRegIndex = pipe[WRITEBACK].my_pipe_state.cmd.dst;
+
     switch(pipe[WRITEBACK].my_pipe_state.cmd.opcode){
         case CMD_ADD:
         case CMD_SUB:
         case CMD_ADDI:
         case CMD_SUBI:
-            regFile[pipe[WRITEBACK].my_pipe_state.cmd.dst] = pipe[WRITEBACK].alu_result;
+            if(dstRegIndex != 0){       //r0 must always contain 0
+                regFile[pipe[WRITEBACK].my_pipe_state.cmd.dst] = pipe[WRITEBACK].alu_result;
+            }
             break;
         case CMD_LOAD:
-            regFile[pipe[WRITEBACK].my_pipe_state.cmd.dst] = pipe[WRITEBACK].memory_data;
+            if(dstRegIndex != 0){       //r0 must always contain 0
+                regFile[pipe[WRITEBACK].my_pipe_state.cmd.dst] = pipe[WRITEBACK].memory_data;
+            }
             break;
         case CMD_HALT:
             break;
         default:
             break;
+    }
+
+    if(split_regfile){
+        splitRegfile();
     }
 }
 
@@ -365,7 +403,7 @@ void detectDataHazardFromPipeStage(int pipe_stage){
     if(pipe[DECODE].my_pipe_state.cmd.src1 == destination){
         printf("data hazard from WB to ID detected!\n");
         hazard_exe_stage_nop = true;
-    }else if (pipe[DECODE].my_pipe_state.cmd.src2 == destination){
+    }else if (pipe[DECODE].my_pipe_state.cmd.src2 == destination){ //Impossible if split-regfile
         printf("data hazard from WB to ID detected!\n");
         hazard_exe_stage_nop = true;
     }
@@ -386,7 +424,9 @@ void hazard_detect(){
     //Find data hazards
     detectDataHazardFromPipeStage(EXECUTE);
     detectDataHazardFromPipeStage(MEMORY);
-    detectDataHazardFromPipeStage(WRITEBACK);
+    if(split_regfile == false){
+        detectDataHazardFromPipeStage(WRITEBACK);
+    }
 }
 
 /*! SIM_CoreClkTick: Update the core simulator's state given one clock cycle.
