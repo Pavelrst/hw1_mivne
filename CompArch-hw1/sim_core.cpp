@@ -211,16 +211,10 @@ void fetch(){
         pipe[curr_st].command_address = PC;
         SIM_MemInstRead(pipe[curr_st].command_address, &pipe[curr_st].my_pipe_state.cmd);
 
-        //Update src values in the command struct.
-//        int reg_src1_index = pipe[curr_st].my_pipe_state.cmd.src1;
-//        pipe[curr_st].my_pipe_state.src1Val = regFile[reg_src1_index];
+        //registers are only read in decode stage
+        pipe[curr_st].my_pipe_state.src1Val = 0;
+        pipe[curr_st].my_pipe_state.src2Val = 0;
         pipe[curr_st].dstVal = 0;
-//        int reg_dst_index = pipe[curr_st].my_pipe_state.cmd.dst;
-//        pipe[curr_st].dstVal = regFile[reg_dst_index];
-//        printf("dstVal is now updated to %d\n", regFile[reg_dst_index]);
-
-        pipe[curr_st].my_pipe_state.src1Val = 0; //Only know this value in DECODE, after we check if it is an immediate
-        pipe[curr_st].my_pipe_state.src2Val = 0; //Only know this value in DECODE, after we check if it is an immediate
     }
 }
 
