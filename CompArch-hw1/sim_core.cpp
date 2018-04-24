@@ -177,9 +177,14 @@ void advanceExeStageNop(){
     hazard_exe_stage_nop = false;
 }
 
-//How to advance commands in the pipe if no branches are taken
-void advancePipeNoFlags(){
-    if(pipe[MEMORY].branch_taken){      //If branch is taken, flush pipe BEFORE advancing the pipe
+//This function puts new commands and/or nops in different stages of the pipe
+void advancePipe() {
+    if (waiting_for_memory == true) {
+        //All pipe stages besides WRITEBACK stay the same
+        flushPipeStage(WRITEBACK);
+        return;
+    }
+        if(pipe[MEMORY].branch_taken){      //If branch is taken, flush pipe BEFORE advancing the pipe
         flushPipeBranchTaken();
         advancePipeNoHazards();
 
@@ -190,16 +195,6 @@ void advancePipeNoFlags(){
     }else{
         advancePipeNoHazards();
     }
-}
-
-//This function puts new commands and/or nops in different stages of the pipe
-void advancePipe() {
-    if (waiting_for_memory == true) {
-        //All pipe stages besides WRITEBACK stay the same
-        flushPipeStage(WRITEBACK);
-        return;
-    }
-    advancePipeNoFlags();
 }
 
 void fetch(){
