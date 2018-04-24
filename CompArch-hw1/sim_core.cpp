@@ -12,7 +12,7 @@ typedef struct pipe_level {
     int32_t dstVal;
     bool branch_taken;
     int32_t memory_data;
-    //If you add new fields, remember to reset them in SIM_CoreReset and in advancePipe!!!!!!
+    //If you add new fields, remember to add them to flushPipeStage
 }pipeLevel;
 
 static int32_t PC;
@@ -21,6 +21,54 @@ pipeLevel pipe[SIM_PIPELINE_DEPTH];
 bool isHalt;
 bool waiting_for_memory;
 bool hazard_exe_stage_nop;
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////Helper functions///////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+
+//Flushes the pipe's command at stage i
+void flushPipeStage(int stage){
+    assert(stage>=FETCH && stage <=WRITEBACK);//legal stage parameter
+    pipe[stage].alu_result = 0;
+    pipe[stage].command_address = -1;//For debugging - this is a flush not a nope we read from instruction memory
+    pipe[stage].branch_taken = false;
+    pipe[stage].memory_data = 0;
+    pipe[stage].dstVal = 0;
+
+    //Resetting the pipe state
+    pipe[stage].dstVal = 0;
+    pipe[stage].my_pipe_state.src1Val = 0;
+    pipe[stage].my_pipe_state.src2Val = 0;
+
+    //Reset the command struct in the pipe state
+    pipe[stage].my_pipe_state.cmd.dst =0;
+    pipe[stage].my_pipe_state.cmd.isSrc2Imm =0;
+    pipe[stage].my_pipe_state.cmd.opcode = CMD_NOP;
+    pipe[stage].my_pipe_state.cmd.src1 =0;
+    pipe[stage].my_pipe_state.cmd.src2 =0;
+}
+
+//Advances the pipe's command at stage i to the pipe at stage i+1
+//MUST advance stages from higher i values to lower i values
+void advancePipeStage(int i){
+    assert(i>=FETCH && i<WRITEBACK);//Only the first four stages can be advanced
+    pipe[i+1].alu_result = pipe[i].alu_result;
+    pipe[i+1].branch_taken = pipe[i].branch_taken;
+    pipe[i+1].command_address = pipe[i].command_address;
+    pipe[i+1].memory_data = pipe[i].memory_data;
+
+    //updating pipe stage state struct
+    pipe[i+1].dstVal = pipe[i].dstVal;
+    pipe[i+1].my_pipe_state.src1Val = pipe[i].my_pipe_state.src1Val;
+    pipe[i+1].my_pipe_state.src2Val = pipe[i].my_pipe_state.src2Val;
+
+    //updating command struct in pipe stage struct
+    pipe[i+1].my_pipe_state.cmd.src1 = pipe[i].my_pipe_state.cmd.src1;
+    pipe[i+1].my_pipe_state.cmd.src2 = pipe[i].my_pipe_state.cmd.src2;
+    pipe[i+1].my_pipe_state.cmd.dst = pipe[i].my_pipe_state.cmd.dst;
+    pipe[i+1].my_pipe_state.cmd.opcode = pipe[i].my_pipe_state.cmd.opcode;
+    pipe[i+1].my_pipe_state.cmd.isSrc2Imm = pipe[i].my_pipe_state.cmd.isSrc2Imm;
+}
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////Core reset/////////////////////////////////////////////////////////////
@@ -44,28 +92,13 @@ int SIM_CoreReset(void) {
 
     for(int i=0; i<SIM_REGFILE_SIZE; i++)//Resetting registers
         regFile[i] == 0;
-    for(int i=0; i<SIM_PIPELINE_DEPTH; i++){//Resetting the pipe
-        pipe[i].alu_result = 0;
-        pipe[i].command_address = 0;
-        pipe[i].branch_taken = false;
-        pipe[i].memory_data = 0;
-
-        //Resetting the pipe state
-        pipe[i].dstVal = 0;
-        pipe[i].my_pipe_state.src1Val = 0;
-        pipe[i].my_pipe_state.src2Val = 0;
-
-        //Reset the command struct in the pipe state
-        pipe[i].my_pipe_state.cmd.dst =0;
-        pipe[i].my_pipe_state.cmd.isSrc2Imm =0;
-        pipe[i].my_pipe_state.cmd.opcode = CMD_NOP;
-        pipe[i].my_pipe_state.cmd.src1 =0;
-        pipe[i].my_pipe_state.cmd.src2 =0;
-    }
+    for(int i=0; i<SIM_PIPELINE_DEPTH; i++)//Resetting the pipe
+        flushPipeStage(i);
 
     //Current state is similar to fetch.
     int curr_st = FETCH;
 
+    pipe[curr_st].command_address = PC;//first command is at address 0
     SIM_MemInstRead(pipe[curr_st].command_address, &pipe[curr_st].my_pipe_state.cmd);
 
     //Update src values
@@ -86,78 +119,45 @@ int SIM_CoreReset(void) {
 //////////////////////////////Clock Tick/////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 
-void advancePipe(){
-    if(waiting_for_memory == true){
-        return;
-    }
+//Advances the pipe regularly if there are no hazards. No nopes are added.
+//Works also in isHalted situation, if there are no hazards
+void advancePipeNoHazards(){
     PC += 4;
-    for(int i=SIM_PIPELINE_DEPTH-1; i>0; i--){
-        pipe[i].alu_result = pipe[i-1].alu_result;
-        pipe[i].branch_taken = pipe[i-1].branch_taken;
-        pipe[i].command_address = pipe[i-1].command_address;
-        pipe[i].memory_data = pipe[i-1].memory_data;
+    for(int i=MEMORY; i>=FETCH; i--)
+        advancePipeStage(i);
 
-        //updating pipe stage state struct
-        pipe[i].dstVal = pipe[i-1].dstVal;
-        pipe[i].my_pipe_state.src1Val = pipe[i-1].my_pipe_state.src1Val;
-        pipe[i].my_pipe_state.src2Val = pipe[i-1].my_pipe_state.src2Val;
-
-        //updating command struct in pipe stage struct
-        pipe[i].my_pipe_state.cmd.src1 = pipe[i-1].my_pipe_state.cmd.src1;
-        pipe[i].my_pipe_state.cmd.src2 = pipe[i-1].my_pipe_state.cmd.src2;
-        pipe[i].my_pipe_state.cmd.dst = pipe[i-1].my_pipe_state.cmd.dst;
-        pipe[i].my_pipe_state.cmd.opcode = pipe[i-1].my_pipe_state.cmd.opcode;
-        pipe[i].my_pipe_state.cmd.isSrc2Imm = pipe[i-1].my_pipe_state.cmd.isSrc2Imm;
-    }
     //For now command in Fetch is garbage
 }
 
 void advanceExeStageNop(){
-//    if(waiting_for_memory == true){
-//        return;
-//    }
 
     //Only EXE and MEM stages advance to MEM and WB stages
-    for(int i=SIM_PIPELINE_DEPTH-1; i>EXECUTE; i--){
-        pipe[i].alu_result = pipe[i-1].alu_result;
-        pipe[i].branch_taken = pipe[i-1].branch_taken;
-        pipe[i].command_address = pipe[i-1].command_address;
-        pipe[i].memory_data = pipe[i-1].memory_data;
-
-        //updating pipe stage state struct
-        pipe[i].dstVal = pipe[i-1].dstVal;
-        pipe[i].my_pipe_state.src1Val = pipe[i-1].my_pipe_state.src1Val;
-        pipe[i].my_pipe_state.src2Val = pipe[i-1].my_pipe_state.src2Val;
-
-        //updating command struct in pipe stage struct
-        pipe[i].my_pipe_state.cmd.src1 = pipe[i-1].my_pipe_state.cmd.src1;
-        pipe[i].my_pipe_state.cmd.src2 = pipe[i-1].my_pipe_state.cmd.src2;
-        pipe[i].my_pipe_state.cmd.dst = pipe[i-1].my_pipe_state.cmd.dst;
-        pipe[i].my_pipe_state.cmd.opcode = pipe[i-1].my_pipe_state.cmd.opcode;
-        pipe[i].my_pipe_state.cmd.isSrc2Imm = pipe[i-1].my_pipe_state.cmd.isSrc2Imm;
-    }
+    advancePipeStage(MEMORY);
+    advancePipeStage(EXECUTE);
 
     //Add NOP to EXE
-    int curr_st = EXECUTE;
-    pipe[curr_st].alu_result = 0;
-    pipe[curr_st].command_address = 0;
-    pipe[curr_st].branch_taken = false;
-    pipe[curr_st].memory_data = 0;
-
-    //Resetting the pipe state
-    pipe[curr_st].dstVal = 0;
-    pipe[curr_st].my_pipe_state.src1Val = 0;
-    pipe[curr_st].my_pipe_state.src2Val = 0;
-
-    //Reset the command struct in the pipe state
-    pipe[curr_st].my_pipe_state.cmd.dst =0;
-    pipe[curr_st].my_pipe_state.cmd.isSrc2Imm =0;
-    pipe[curr_st].my_pipe_state.cmd.opcode = CMD_NOP;
-    pipe[curr_st].my_pipe_state.cmd.src1 =0;
-    pipe[curr_st].my_pipe_state.cmd.src2 =0;
+    flushPipeStage(EXECUTE);
 
     //set down the flag
     hazard_exe_stage_nop = false;
+}
+
+void advancePipeNoFlags(){
+    if(hazard_exe_stage_nop){
+        advanceExeStageNop();
+    }else{
+        advancePipeNoHazards();
+    }
+}
+
+//This function puts new commands and/or nops in different stages of the pipe
+void advancePipe(){
+    if(waiting_for_memory == true)
+        return;
+    if(forwarding == false) {    //No flags
+        assert(split_regfile == false);
+        advancePipeNoFlags();
+    }
 }
 
 void fetch(){
@@ -167,19 +167,13 @@ void fetch(){
         return;
     }
 
+    flushPipeStage(curr_st);
+
     if(isHalt){
       pipe[curr_st].command_address = -1;//NOP, not read from instruction memory
     }else{
         pipe[curr_st].command_address = PC;
     }
-    pipe[curr_st].branch_taken = false;
-    pipe[curr_st].alu_result = 0; //ours, not necessary
-    pipe[curr_st].memory_data = 0; // ours, not necessary
-
-    //reset all printed fields - in struct pipeStageState
-    pipe[curr_st].my_pipe_state.src1Val = 0;
-    pipe[curr_st].my_pipe_state.src2Val = 0;
-
 
     if(!isHalt){
         SIM_MemInstRead(pipe[curr_st].command_address, &pipe[curr_st].my_pipe_state.cmd);
@@ -192,8 +186,6 @@ void fetch(){
 
         pipe[curr_st].my_pipe_state.src2Val = 0;
     }
-
-
 }
 
 void decode(){
@@ -205,6 +197,10 @@ void decode(){
     } else{
         pipe[curr_st].my_pipe_state.src2Val = pipe[curr_st].my_pipe_state.cmd.src2;
     }
+
+    //If the command is BR, the branch is always taken
+    if(pipe[curr_st].my_pipe_state.cmd.opcode == CMD_BR)
+        pipe[curr_st].branch_taken = true;
 }
 
 void execute(){
@@ -250,7 +246,7 @@ void execute(){
             //PC is update at MEM stage of the pipe
             break;
         case CMD_BREQ:
-            assert(pipe[2].my_pipe_state.cmd.isSrc2Imm == false);
+            assert(pipe[EXECUTE].my_pipe_state.cmd.isSrc2Imm == false);
             if(src1Val == src2Val){
                 pipe[EXECUTE].branch_taken = true;
             }else{
@@ -259,7 +255,7 @@ void execute(){
             pipe[EXECUTE].alu_result = (PC - 4) + dstVal;//-4 because we advanced PC too many times
             break;
         case CMD_BRNEQ:
-            assert(pipe[2].my_pipe_state.cmd.isSrc2Imm == false);
+            assert(pipe[EXECUTE].my_pipe_state.cmd.isSrc2Imm == false);
             if(src1Val != src2Val){
                 pipe[EXECUTE].branch_taken = true;
             }else{
@@ -291,43 +287,14 @@ void memory(){
             SIM_MemDataWrite(memory_address, pipe[curr_st].my_pipe_state.src1Val);
             break;
         case CMD_BR:
-            PC = pipe[curr_st].alu_result;//jmp
-
-            //Flushing the pipe
-            for(int i=0; i<curr_st; i++){
-                pipe[i].branch_taken = false;
-                pipe[i].alu_result = 0; //ours, not necessary
-                pipe[i].memory_data = 0; // ours, not necessary
-
-                pipe[i].my_pipe_state.src1Val = 0;
-                pipe[i].my_pipe_state.src2Val = 0;
-
-                pipe[i].my_pipe_state.cmd.opcode = CMD_NOP;
-                pipe[i].my_pipe_state.cmd.dst = 0;
-                pipe[i].my_pipe_state.cmd.src1 = 0;
-                pipe[i].my_pipe_state.cmd.src2 = 0;
-                pipe[i].my_pipe_state.cmd.isSrc2Imm = 0;
-            }
-            break;
         case CMD_BREQ:
         case CMD_BRNEQ:
             if(pipe[curr_st].branch_taken){
                 PC = pipe[curr_st].alu_result;//jmp
 
-                //Flushing the pipe
-                for(int i=0; i<curr_st; i++){
-                    pipe[i].branch_taken = false;
-                    pipe[i].alu_result = 0; //ours, not necessary
-                    pipe[i].memory_data = 0; // ours, not necessary
-
-                    pipe[i].my_pipe_state.src1Val = 0;
-                    pipe[i].my_pipe_state.src2Val = 0;
-
-                    pipe[i].my_pipe_state.cmd.opcode = CMD_NOP;
-                    pipe[i].my_pipe_state.cmd.dst = 0;
-                    pipe[i].my_pipe_state.cmd.src1 = 0;
-                    pipe[i].my_pipe_state.cmd.src2 = 0;
-                    pipe[i].my_pipe_state.cmd.isSrc2Imm = 0;
+                //Flushing the pipe before EXECUTE
+                for(int i=FETCH; i<EXECUTE; i++){
+                    flushPipeStage(i);
                 }
             }
             break;
@@ -338,8 +305,6 @@ void memory(){
 }
 void writeback(){
     switch(pipe[WRITEBACK].my_pipe_state.cmd.opcode){
-        case CMD_NOP:
-            break;
         case CMD_ADD:
         case CMD_SUB:
         case CMD_ADDI:
@@ -349,14 +314,10 @@ void writeback(){
         case CMD_LOAD:
             regFile[pipe[WRITEBACK].my_pipe_state.cmd.dst] = pipe[WRITEBACK].memory_data;
             break;
-        case CMD_STORE:
-            break;
-        case CMD_BR:
-        case CMD_BREQ:
-        case CMD_BRNEQ:
-            break;
         case CMD_HALT:
             PC += 4;
+            break;
+        default:
             break;
     }
 }
@@ -376,12 +337,8 @@ void hazard_detect(){
   This function is expected to update the core pipeline given a clock cycle event.
 */
 void SIM_CoreClkTick() {
-    if(hazard_exe_stage_nop){
-       advanceExeStageNop();
-    }else{
-        advancePipe();
-    }
-
+    advancePipe();
+    
     fetch();
     decode();
     execute();
