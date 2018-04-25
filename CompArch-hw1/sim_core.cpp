@@ -166,7 +166,7 @@ void flushPipeBranchTaken(){
 //Advances stages MEM and EXE, puts a NOP in EXE and doesn't advance IF or ID
 void advanceExeStageNop(){
 
-    printf("Advance EXE stage NOP invoked\n");
+    //printf("Advance EXE stage NOP invoked\n");
     //Only EXE and MEM stages advance to MEM and WB stages
     advancePipeStage(MEMORY);
     advancePipeStage(EXECUTE);
@@ -460,10 +460,10 @@ void detectDataHazardFromPipeStage(int pipe_stage){
     int destination = getDstRegOfPipeStage(pipe_stage);
     if(destination == -1) return;           //If this command does not write back to the register file
     if(pipe[DECODE].my_pipe_state.cmd.src1 == destination){
-        printf("data hazard from WB to ID detected!\n");
+        //printf("data hazard from WB to ID detected!\n");
         hazard_exe_stage_nop = true;
     }else if (pipe[DECODE].my_pipe_state.cmd.src2 == destination){ //Impossible if split-regfile
-        printf("data hazard from WB to ID detected!\n");
+        //printf("data hazard from WB to ID detected!\n");
         hazard_exe_stage_nop = true;
     }
 }
