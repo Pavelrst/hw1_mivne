@@ -154,14 +154,14 @@ void splitRegfile(){
         case CMD_SUB:
         case CMD_ADDI:
         case CMD_SUBI:
-            printf("alu result advanced to register\n");
+            //printf("alu result advanced to register\n");
             dst_reg_value = pipe[MEMORY].alu_result;
             break;
         default:
             //If the command doesn't write to any registers in the writeback stage
             return;
     }
-    assert(dst_reg_value != -1);
+    //assert(dst_reg_value != -1);
 
     //Update the value at the register
     regFile[pipe[MEMORY].my_pipe_state.cmd.dst] = dst_reg_value;
@@ -213,7 +213,7 @@ void flushPipeBranchTaken(){
     flushPipeStage(FETCH);
     flushPipeStage(DECODE);
     flushPipeStage(EXECUTE);
-    printf("we are about to flush for a taken branch. We have command address as %d and dstVal as %d\n", pipe[MEMORY].command_address, pipe[MEMORY].dstVal);
+    //printf("we are about to flush for a taken branch. We have command address as %d and dstVal as %d\n", pipe[MEMORY].command_address, pipe[MEMORY].dstVal);
     PC = pipe[MEMORY].command_address+pipe[MEMORY].dstVal; //update PC address
 }
 
@@ -309,11 +309,11 @@ void forwardData(){
         //Therefore we are certain the result is in alu_result and not memory_address
 
         if(pipe[EXECUTE].my_pipe_state.cmd.src1 == mem_cmd_dst){
-            printf("Data forwarded from MEM to EXE\n");
+            //printf("Data forwarded from MEM to EXE\n");
             pipe[EXECUTE].my_pipe_state.src1Val = pipe[MEMORY].alu_result;
             return; //Data cannot be forwarded twice
         }else if(!pipe[EXECUTE].my_pipe_state.cmd.isSrc2Imm && pipe[EXECUTE].my_pipe_state.cmd.src2 == mem_cmd_dst){
-            printf("Data forwarded from MEM to EXE\n");
+            //printf("Data forwarded from MEM to EXE\n");
             pipe[EXECUTE].my_pipe_state.src2Val = pipe[MEMORY].alu_result;
             return; //Data cannot be forwarded twice
         }
@@ -341,10 +341,10 @@ void forwardData(){
         }
 
         if(pipe[EXECUTE].my_pipe_state.cmd.src1 == wb_cmd_dst){
-            printf("Data forwarded from WB to EXE\n");
+            //printf("Data forwarded from WB to EXE\n");
             pipe[EXECUTE].my_pipe_state.src1Val = data_to_forward;
         }else if(!pipe[EXECUTE].my_pipe_state.cmd.isSrc2Imm && pipe[EXECUTE].my_pipe_state.cmd.src2 == wb_cmd_dst){
-            printf("Data forwarded from WB to EXE\n");
+            //printf("Data forwarded from WB to EXE\n");
             pipe[EXECUTE].my_pipe_state.src2Val = data_to_forward;
         }
     }
