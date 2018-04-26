@@ -141,8 +141,9 @@ int SIM_CoreReset(void) {
 //////////////////////////////Clock Tick/////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 
+//Advances register values from the Writeback stage to the registers at the first half of the clock cycle
 void splitRegfile(){
-    assert(split_regfile || forwarding);
+    assert(split_regfile || forwarding);//Is it enabled?
 
     int dst_reg_value = -1;         //The register value we need to forward, can be either in alu_result or memory_data
     switch(pipe[MEMORY].my_pipe_state.cmd.opcode){
@@ -160,21 +161,15 @@ void splitRegfile(){
             //If the command doesn't write to any registers in the writeback stage
             return;
     }
+    assert(dst_reg_value != -1);
 
+    //Update the value at the register
     regFile[pipe[MEMORY].my_pipe_state.cmd.dst] = dst_reg_value;
-
-//    //The actual forwarding
-//    int dst_reg_index = pipe[MEMORY].my_pipe_state.cmd.dst;
-//    if(dst_reg_index == pipe[DECODE].my_pipe_state.cmd.src1){
-//        pipe[DECODE].my_pipe_state.src1Val = dst_reg_value;
-//    }else if (!pipe[DECODE].my_pipe_state.cmd.isSrc2Imm && dst_reg_index == pipe[DECODE].my_pipe_state.cmd.src2){
-//        pipe[DECODE].my_pipe_state.src2Val = dst_reg_value;
-//    }
 }
 
-//Update all registers at clock tick from the last Writeback stage
+//Update all registers
 void updateRegisters(){
-    if(!split_regfile && !forwarding) {
+    if(!split_regfile && !forwarding) {         //If split registerfile is enabled, the registers were already updated
         int dstRegIndex = pipe[WRITEBACK].my_pipe_state.cmd.dst;
 
         switch (pipe[WRITEBACK].my_pipe_state.cmd.opcode) {
@@ -455,61 +450,7 @@ void memory(){
     }
 }
 
-//void splitRegfile(){
-//    assert(split_regfile || forwarding);
-//
-//    int dst_reg_value = -1;         //The register value we need to forward, can be either in alu_result or memory_data
-//    switch(pipe[WRITEBACK].my_pipe_state.cmd.opcode){
-//        case CMD_LOAD:
-//            dst_reg_value = pipe[WRITEBACK].memory_data;
-//            break;
-//        case CMD_ADD:
-//        case CMD_SUB:
-//        case CMD_ADDI:
-//        case CMD_SUBI:
-//            dst_reg_value = pipe[WRITEBACK].alu_result;
-//            break;
-//        default:
-//            //If the command doesn't write to any registers in the writeback stage
-//            return;
-//    }
-//
-//    //The actual forwarding
-//    int dst_reg_index = pipe[WRITEBACK].my_pipe_state.cmd.dst;
-//    if(dst_reg_index == pipe[DECODE].my_pipe_state.cmd.src1){
-//        pipe[DECODE].my_pipe_state.src1Val = dst_reg_value;
-//    }else if (!pipe[DECODE].my_pipe_state.cmd.isSrc2Imm && dst_reg_index == pipe[DECODE].my_pipe_state.cmd.src2){
-//        pipe[DECODE].my_pipe_state.src2Val = dst_reg_value;
-//    }
-//}
-
-void writeback(){
-//    int dstRegIndex = pipe[WRITEBACK].my_pipe_state.cmd.dst;
-//
-//    switch(pipe[WRITEBACK].my_pipe_state.cmd.opcode){
-//        case CMD_ADD:
-//        case CMD_SUB:
-//        case CMD_ADDI:
-//        case CMD_SUBI:
-//            if(dstRegIndex != 0){       //r0 must always contain 0
-//                regFile[pipe[WRITEBACK].my_pipe_state.cmd.dst] = pipe[WRITEBACK].alu_result;
-//            }
-//            break;
-//        case CMD_LOAD:
-//            if(dstRegIndex != 0){       //r0 must always contain 0
-//                regFile[pipe[WRITEBACK].my_pipe_state.cmd.dst] = pipe[WRITEBACK].memory_data;
-//            }
-//            break;
-//        case CMD_HALT:
-//            break;
-//        default:
-//            break;
-//    }
-
-//    if(split_regfile || forwarding){
-//        splitRegfile();
-//    }
-}
+void writeback(){}
 
 
 //Finds data hazard from pipe_stage to the command in DECODE
@@ -587,4 +528,3 @@ void SIM_CoreGetState(SIM_coreState *curState) {
         curState->pipeStageState[i].src2Val = pipe[i].my_pipe_state.src2Val;
     }
 }
-
