@@ -94,6 +94,15 @@ int getDstRegOfPipeStage(int i){
     return pipe[i].my_pipe_state.cmd.dst;
 }
 
+////Gets a stage index (such as WRITEBACK), returns true if it is a branch
+//bool isPipeStageBranch(int stage){
+//    assert(stage >= FETCH && stage<=WRITEBACK);
+//    int opcode = pipe[stage].my_pipe_state.cmd.opcode;
+//    if(opcode == CMD_BREQ || opcode == CMD_BR || opcode == CMD_BRNEQ)
+//        return true;
+//    return false;
+//}
+
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////Core reset/////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -213,7 +222,7 @@ void flushPipeBranchTaken(){
     flushPipeStage(FETCH);
     flushPipeStage(DECODE);
     flushPipeStage(EXECUTE);
-    //printf("we are about to flush for a taken branch. We have command address as %d and dstVal as %d\n", pipe[MEMORY].command_address, pipe[MEMORY].dstVal);
+//    printf("we are about to flush for a taken branch. We have command address as %d and dstVal as %d\n", pipe[MEMORY].command_address, pipe[MEMORY].dstVal);
     PC = pipe[MEMORY].command_address+pipe[MEMORY].dstVal; //update PC address
 }
 
@@ -298,9 +307,10 @@ void decode(){
 void forwardData(){
     if(!forwarding) return;
     int exe_opcode = pipe[EXECUTE].my_pipe_state.cmd.opcode;    //Opcode of the command in EXE
+    bool src1_forwarded = false, src2_forwarded = false, dst_forwarded = false;
 
     //commands that do not read data from registers
-    if(exe_opcode == CMD_BR || exe_opcode == CMD_NOP || exe_opcode == CMD_HALT) return;
+    if(exe_opcode == CMD_NOP || exe_opcode == CMD_HALT) return;
 
     //Forwarding from MEMORY to EXECUTE
     int mem_cmd_dst = getDstRegOfPipeStage(MEMORY);
@@ -311,11 +321,17 @@ void forwardData(){
         if(pipe[EXECUTE].my_pipe_state.cmd.src1 == mem_cmd_dst){
             //printf("Data forwarded from MEM to EXE\n");
             pipe[EXECUTE].my_pipe_state.src1Val = pipe[MEMORY].alu_result;
-            return; //Data cannot be forwarded twice
-        }else if(!pipe[EXECUTE].my_pipe_state.cmd.isSrc2Imm && pipe[EXECUTE].my_pipe_state.cmd.src2 == mem_cmd_dst){
-            //printf("Data forwarded from MEM to EXE\n");
+            src1_forwarded = true;
+        }
+        if(!pipe[EXECUTE].my_pipe_state.cmd.isSrc2Imm && pipe[EXECUTE].my_pipe_state.cmd.src2 == mem_cmd_dst){
+//            printf("Data forwarded from MEM to EXE\n");
             pipe[EXECUTE].my_pipe_state.src2Val = pipe[MEMORY].alu_result;
-            return; //Data cannot be forwarded twice
+            src2_forwarded = true;
+
+        }
+        if(pipe[EXECUTE].my_pipe_state.cmd.dst == mem_cmd_dst){
+            pipe[EXECUTE].dstVal = pipe[MEMORY].alu_result;
+            dst_forwarded = true;
         }
     }
 
@@ -340,12 +356,19 @@ void forwardData(){
                 return;
         }
 
-        if(pipe[EXECUTE].my_pipe_state.cmd.src1 == wb_cmd_dst){
+        if(pipe[EXECUTE].my_pipe_state.cmd.src1 == wb_cmd_dst && !src1_forwarded){
             //printf("Data forwarded from WB to EXE\n");
             pipe[EXECUTE].my_pipe_state.src1Val = data_to_forward;
-        }else if(!pipe[EXECUTE].my_pipe_state.cmd.isSrc2Imm && pipe[EXECUTE].my_pipe_state.cmd.src2 == wb_cmd_dst){
+        }
+        if(!pipe[EXECUTE].my_pipe_state.cmd.isSrc2Imm && pipe[EXECUTE].my_pipe_state.cmd.src2 == wb_cmd_dst){
             //printf("Data forwarded from WB to EXE\n");
-            pipe[EXECUTE].my_pipe_state.src2Val = data_to_forward;
+            if(!src2_forwarded){
+                pipe[EXECUTE].my_pipe_state.src2Val = data_to_forward;
+            }
+        }
+        if(pipe[EXECUTE].my_pipe_state.cmd.dst == wb_cmd_dst && !dst_forwarded){
+//            printf("Data forwarded from WB to EXE, dst\n");
+            pipe[EXECUTE].dstVal = data_to_forward;
         }
     }
 }
@@ -465,6 +488,8 @@ void detectDataHazardFromPipeStage(int pipe_stage){
         hazard_exe_stage_nop = true;
     }else if (pipe[DECODE].my_pipe_state.cmd.src2 == destination){ //Impossible if split-regfile
         //printf("data hazard from WB to ID detected!\n");
+        hazard_exe_stage_nop = true;
+    }else if (pipe[DECODE].my_pipe_state.cmd.dst == destination){ //Branches care about the value in dst
         hazard_exe_stage_nop = true;
     }
 }
